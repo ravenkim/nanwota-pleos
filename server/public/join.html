@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>탑승 · 나눠타</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="bar"></div>
+<main>
+  <div class="title-row">
+    <h1 id="title">좌석 확인 중</h1>
+    <p class="sub" id="sub">탄 구간만큼만, 차가 잰 연비로 나눠 내요.</p>
+  </div>
+  <div class="grid two">
+    <section class="panel" aria-labelledby="h-seat">
+      <header><h2 id="h-seat">내 자리</h2><span class="meta" id="car"></span></header>
+      <div class="seatmap" id="seatmap" aria-label="좌석 배치도"></div>
+      <p class="note">내릴 때는 그냥 내리면 돼요. 좌석이 비고 문이 열리면 차가 알아서 하차로 기록해요.</p>
+    </section>
+    <section class="panel" aria-labelledby="h-go" id="go">
+      <header><h2 id="h-go">탑승 등록</h2></header>
+      <button class="btn kakao" id="kakao" type="button" hidden>
+        <svg viewBox="0 0 18 18" aria-hidden="true"><path fill="#191919" d="M9 1.5C4.6 1.5 1 4.3 1 7.8c0 2.2 1.5 4.2 3.7 5.3l-.9 3.4c-.1.3.2.5.5.4l4-2.6h.7c4.4 0 8-2.8 8-6.3S13.4 1.5 9 1.5z"/></svg>
+        카카오로 탑승하기
+      </button>
+      <div class="or" id="or" hidden>또는</div>
+      <form id="name-form">
+        <div class="field">
+          <label for="name">이름</label>
+          <input id="name" name="name" autocomplete="nickname" maxlength="20" required>
+          <span class="hint" id="name-hint">같이 탄 사람들의 정산표에 이 이름으로 보여요.</span>
+        </div>
+        <div class="actions"><button class="btn primary" type="submit">이 좌석으로 탑승</button></div>
+      </form>
+      <p class="note" id="note" role="status"></p>
+    </section>
+  </div>
+</main>
+<script type="module">
+import { bar, api, esc, SEAT_LABEL, me, $ } from "/app.js";
+
+const [, , tripId, seat] = location.pathname.split("/");
+const q = new URLSearchParams(location.search);
+const token = q.get("t") ?? q.get("state"); // 카카오 로그인에서 돌아오면 state에 QR 토큰
+const isOut = q.get("out") === "1";
+$("#bar").outerHTML = bar(SEAT_LABEL[seat] ?? "탑승");
+
+// 위에서 본 배치: 앞줄 운전석·조수석, 뒷줄 세 자리
+const LAYOUT = [
+  ["DRIVER", "front", 1], ["FRONT_RIGHT", "front", 3],
+  ["REAR_LEFT", "rear", 1], ["REAR_CENTER", "rear", 2], ["REAR_RIGHT", "rear", 3],
+];
+function seatmap(taken = []) {
+  $("#seatmap").innerHTML = LAYOUT.map(([id, row, col]) => {
+    const t = taken.find((r) => r.seat === id && !r.alighted);
+    const cls = id === seat ? "seat me" : t || id === "DRIVER" ? "seat taken" : "seat";
+    const label = id === seat ? "여기" : id === "DRIVER" ? "운전" : t ? esc(t.name) : "빈자리";
+    return `<div class="${cls} ${row}" data-seat="${id}" style="grid-column:${col}" aria-label="${SEAT_LABEL[id]} ${label}">${label}</div>`;
+  }).join("");
+}
+seatmap();
+$("#title").textContent = `${SEAT_LABEL[seat] ?? "이 좌석"}에 타셨네요`;
+
+const existing = me.get(tripId);
+if (isOut && existing) {
+  // 하차 QR: 이미 이 폰으로 탄 사람이면 바로 하차 요청
+  $("#title").textContent = "여기서 내리시나요?";
+  $("#go").innerHTML = `<header><h2 id="h-go">하차</h2></header><p>지금까지 탄 구간으로 금액이 확정돼요.</p><div class="actions"><button class="btn primary" id="out" type="button">하차하고 내 몫 보기</button></div><p class="note" id="note" role="status"></p>`;
+  $("#out").addEventListener("click", async () => {
+    try {
+      await api(`/api/trips/${tripId}/riders/${existing.riderId}/checkout`, { method: "POST", body: { secret: existing.secret } });
+      location.href = `/t/${tripId}`;
+    } catch (e) { $("#note").textContent = e.message; }
+  });
+} else if (existing && !isOut) {
+  $("#note").innerHTML = `이 폰은 이미 이 운행에 탑승해 있어요. <a href="/t/${tripId}">내 몫 보기</a>`;
+}
+
+async function checkin(body) {
+  const note = $("#note");
+  note.textContent = "등록하는 중…";
+  try {
+    const r = await api(`/api/trips/${tripId}/seats/${seat}/checkin`, { method: "POST", body: { token, ...body } });
+    me.set(tripId, r);
+    location.href = `/t/${tripId}`;
+  } catch (e) {
+    note.textContent = e.message;
+  }
+}
+
+$("#name-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  checkin({ name: $("#name").value });
+});
+
+// 카카오 로그인 (JS 키가 설정된 경우)
+const { kakaoJsKey } = await api("/api/config").catch(() => ({}));
+if (kakaoJsKey && !isOut) {
+  const s = document.createElement("script");
+  s.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js";
+  s.crossOrigin = "anonymous";
+  s.onload = () => {
+    Kakao.init(kakaoJsKey);
+    $("#kakao").hidden = false;
+    $("#or").hidden = false;
+    // 카카오 로그인 뒤 돌아오면 프로필로 체크인
+    const code = q.get("code");
+    if (code) checkin({ kakaoCode: code, redirectUri: location.origin + location.pathname });
+  };
+  document.head.append(s);
+  $("#kakao").addEventListener("click", () => {
+    Kakao.Auth.authorize({
+      redirectUri: location.origin + location.pathname,
+      state: token,
+      scope: "profile_nickname,profile_image",
+    });
+  });
+}
+</script>
+</body>
+</html>

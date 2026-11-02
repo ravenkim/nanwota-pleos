@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>정산표 · 나눠타</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="bar"></div>
+<main>
+  <div class="title-row">
+    <h1 id="title">이번 운행 정산</h1>
+    <p class="sub" id="sub"><span class="skeleton">불러오는 중 · 000.0km</span></p>
+  </div>
+  <div class="grid wide-left">
+    <section class="panel" aria-labelledby="h-who">
+      <header><h2 id="h-who">누가 얼마</h2><span class="meta" id="state"></span></header>
+      <ul class="rows" id="rows"><li><span class="skeleton">불러오는 중입니다</span></li></ul>
+      <div class="total-row"><span>동승자 합계</span><span class="num" id="sum">—</span></div>
+      <div class="actions">
+        <button class="btn primary" id="share" type="button">단톡방에 정산표 보내기</button>
+      </div>
+      <p class="note" id="share-note" role="status"></p>
+    </section>
+    <div class="stack">
+      <section class="panel" aria-labelledby="h-lanes">
+        <header><h2 id="h-lanes">누가 어디까지 탔나</h2></header>
+        <div id="lanes"></div>
+      </section>
+      <section class="panel" aria-labelledby="h-cost">
+        <header><h2 id="h-cost">기름값</h2><span class="meta" id="unit"></span></header>
+        <p class="amount" id="total">—</p>
+        <p class="amount-line" id="total-line"></p>
+      </section>
+    </div>
+  </div>
+</main>
+<script type="module">
+import { bar, api, won, km, esc, initial, SEAT_LABEL, lanes, lanePeople, alightCuts, poll, $ } from "/app.js";
+
+const tripId = location.pathname.split("/")[2];
+$("#bar").outerHTML = bar("정산표");
+let last;
+
+function render({ trip, bills }) {
+  last = { trip, bills };
+  const riders = bills.length;
+  $("#title").textContent = `${trip.driverName}님 차 정산표`;
+  $("#sub").textContent = `${riders + 1}명 · ${km(trip.totalKm)} · ${trip.ended ? "운행 끝" : "운행 중"}`;
+  $("#state").innerHTML = trip.ended ? "모두 확정" : `<span class="live-dot"></span>${km(trip.totalKm)}까지 반영`;
+
+  const sorted = [...bills].sort((a, b) => b.amount - a.amount);
+  $("#rows").innerHTML = sorted.length
+    ? sorted
+        .map(
+          (b) => `<li data-seat="${b.seat}">
+            <span class="who" aria-hidden="true">${esc(initial(b.name))}</span>
+            <div class="main"><div class="name">${esc(b.name)} ${b.final ? `<span class="pill pos">확정</span>` : `<span class="pill">탑승 중</span>`}</div><div class="sub">${SEAT_LABEL[b.seat] ?? ""} · ${km(b.distanceKm)}${b.alightPlace ? ` · ${esc(b.alightPlace)} 하차` : ""}</div></div>
+            <div class="fig"><span class="v">${won(b.amount)}</span><span class="u">${b.final ? "보낼 금액" : "지금까지"}</span></div>
+          </li>`,
+        )
+        .join("")
+    : `<li><div class="empty">아직 등록한 동승자가 없어요. 차 화면의 좌석 QR을 찍으면 여기에 나와요.</div></li>`;
+  const sum = bills.reduce((a, b) => a + b.amount, 0);
+  $("#sum").textContent = won(sum);
+
+  $("#lanes").innerHTML = lanes(lanePeople(trip, bills), trip.totalKm, alightCuts(trip, bills));
+
+  $("#total").textContent = won(trip.totalCost);
+  $("#unit").textContent = `${trip.fuelType === "ELECTRIC" ? "전기" : "휘발유"} ${trip.unitPrice.toLocaleString("ko-KR")}${trip.unitLabel}`;
+  $("#total-line").innerHTML = `동승자 ${won(sum)} · <b>운전자 몫 ${won(trip.totalCost - sum)}</b> (차량 실측 연비로 계산)`;
+}
+
+function shareText() {
+  const { trip, bills } = last;
+  const lines = bills.map((b) => `${b.name} ${km(b.distanceKm)} ${won(b.amount)}${b.final ? "" : " (탑승 중)"}`);
+  return `[나눠타] ${trip.driverName}님 차 정산표 · ${km(trip.totalKm)}\n${lines.join("\n")}\n${location.href}`;
+}
+
+$("#share").addEventListener("click", async () => {
+  if (!last) return;
+  const note = $("#share-note");
+  const { kakaoJsKey } = await api("/api/config").catch(() => ({}));
+  if (kakaoJsKey && window.Kakao) {
+    if (!Kakao.isInitialized()) Kakao.init(kakaoJsKey);
+    Kakao.Share.sendDefault({
+      objectType: "text",
+      text: shareText(),
+      link: { mobileWebUrl: location.href, webUrl: location.href },
+      buttonTitle: "정산표 보기",
+    });
+    return;
+  }
+  if (navigator.share) {
+    try { await navigator.share({ title: "나눠타 정산표", text: shareText(), url: location.href }); return; } catch {}
+  }
+  try {
+    await navigator.clipboard.writeText(shareText());
+    note.textContent = "정산표를 복사했어요. 단톡방에 붙여 넣으면 됩니다.";
+  } catch {
+    note.textContent = "공유를 열 수 없어요. 이 페이지 주소를 단톡방에 보내 주세요.";
+  }
+});
+
+api("/api/config").then(({ kakaoJsKey }) => {
+  if (!kakaoJsKey) return;
+  const s = document.createElement("script");
+  s.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js";
+  s.crossOrigin = "anonymous";
+  document.head.append(s);
+}).catch(() => {});
+
+poll(async () => {
+  try {
+    render(await api(`/api/trips/${tripId}/summary`));
+  } catch (e) {
+    $("#rows").innerHTML = `<li><div class="error">${esc(e.message)} 잠시 뒤 다시 불러올게요.</div></li>`;
+  }
+}, 5000);
+</script>
+</body>
+</html>

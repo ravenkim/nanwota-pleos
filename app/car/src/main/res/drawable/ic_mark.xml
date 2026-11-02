@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 옆에서 본 좌석 둘: 앞(액센트)과 뒤(잉크) — 웹의 마크와 같은 모양 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="28" android:viewportHeight="28">
+    <path android:fillColor="#F3F5F7" android:pathData="M0,0h28v28h-28z" />
+    <path android:fillColor="#1D5FD6" android:pathData="M4,4.5c0,-1.1 1.2,-1.8 2.2,-1.2l1,0.6c0.5,0.3 0.8,0.8 0.8,1.4V15h5.5a2,2 0,0 1,2 2v2.5a1.5,1.5 0,0 1,-1.5 1.5H6a2,2 0,0 1,-2 -2z" />
+    <path android:fillColor="#1B1D1F" android:pathData="M12,8.5c0,-1.1 1.2,-1.8 2.2,-1.2l1,0.6c0.5,0.3 0.8,0.8 0.8,1.4V19h5.5a2,2 0,0 1,2 2v2.5a1.5,1.5 0,0 1,-1.5 1.5H14a2,2 0,0 1,-2 -2z" />
+</vector>

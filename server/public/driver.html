@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>운전자 설정 · 나눠타</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="bar"></div>
+<main>
+  <div class="title-row">
+    <h1>운전자 설정</h1>
+    <p class="sub">한 번만 등록하면 동승자 청구서마다 송금 버튼이 붙어요.</p>
+  </div>
+  <div class="grid two">
+    <section class="panel" aria-labelledby="h-form">
+      <header><h2 id="h-form">이름과 송금 링크</h2></header>
+      <form id="form">
+        <div class="field">
+          <label for="driverName">이름</label>
+          <input id="driverName" name="driverName" maxlength="20" autocomplete="nickname" required>
+        </div>
+        <div class="field">
+          <label for="payLink">송금 링크</label>
+          <input id="payLink" name="payLink" inputmode="url" autocomplete="url" aria-describedby="pay-hint" placeholder="https://">
+          <span class="hint" id="pay-hint">간편결제 앱의 '송금 QR·링크'에서 복사한 https 주소. 비워 두면 동승자에게 금액만 보여요.</span>
+        </div>
+        <div class="actions"><button class="btn primary" type="submit">저장</button></div>
+        <p class="note" id="note" role="status"></p>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="h-preview">
+      <header><h2 id="h-preview">동승자 폰에는 이렇게 보여요</h2></header>
+      <div data-seat="REAR_RIGHT">
+        <p class="muted">하늘님 몫</p>
+        <p class="amount">2,730원</p>
+        <p class="amount-line"><b>92.4km</b> 탔어요 · 원주에서 하차 · 금액 확정</p>
+        <div class="actions"><span class="btn primary" id="preview-btn">운전자님에게 2,730원 보내기</span></div>
+      </div>
+    </section>
+  </div>
+</main>
+<script type="module">
+import { bar, api, $ } from "/app.js";
+
+const vehicleId = location.pathname.split("/")[2];
+const t = new URLSearchParams(location.search).get("t");
+$("#bar").outerHTML = bar("운전자");
+const preview = () => {
+  const n = $("#driverName").value.trim() || "운전자";
+  $("#preview-btn").textContent = $("#payLink").value.trim() ? `${n}님에게 2,730원 보내기` : `${n}님이 송금 링크를 아직 등록하지 않았어요`;
+};
+$("#form").addEventListener("input", preview);
+
+try {
+  const v = await api(`/api/vehicles/${vehicleId}?t=${encodeURIComponent(t)}`);
+  $("#driverName").value = v.driverName;
+  $("#payLink").value = v.payLink;
+  preview();
+} catch (e) {
+  $("#note").textContent = `${e.message}. 차 화면의 운전자 QR을 다시 찍어 주세요.`;
+}
+
+$("#form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api(`/api/vehicles/${vehicleId}`, { method: "PUT", body: { t, driverName: $("#driverName").value, payLink: $("#payLink").value } });
+    $("#note").textContent = "저장했어요.";
+  } catch (err) {
+    $("#note").textContent = err.message;
+  }
+});
+</script>
+</body>
+</html>

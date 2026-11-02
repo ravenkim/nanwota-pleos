@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>내 몫 · 나눠타</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="bar"></div>
+<main>
+  <div class="title-row">
+    <h1 id="title">내 몫</h1>
+    <p class="sub" id="sub"><span class="skeleton">불러오는 중 · 조수석</span></p>
+  </div>
+  <div class="grid two">
+    <div class="stack">
+      <section class="panel" aria-labelledby="title" id="bill">
+        <p class="amount" id="amount"><span class="skeleton">0,000원</span></p>
+        <p class="amount-line" id="line"></p>
+        <div class="actions" id="actions"></div>
+        <p class="note" id="note" role="status"></p>
+      </section>
+      <section class="panel" aria-labelledby="h-lanes">
+        <header><h2 id="h-lanes">함께 탄 구간</h2><a class="meta" id="all" href="#">정산표 전체</a></header>
+        <div id="lanes"></div>
+      </section>
+    </div>
+    <section class="panel" aria-labelledby="h-calc">
+      <header><h2 id="h-calc">계산 근거</h2><span class="meta" id="unit"></span></header>
+      <div id="calc"></div>
+    </section>
+  </div>
+</main>
+<script type="module">
+import { bar, api, won, km, esc, SEAT_LABEL, lanes, lanePeople, alightCuts, poll, me, $ } from "/app.js";
+
+const tripId = location.pathname.split("/")[2];
+const params = new URLSearchParams(location.search);
+// 시연: /t/demo?rider=hn 처럼 열면 그 동승자로 본다
+if (tripId === "demo" && params.get("rider")) me.set("demo", { riderId: params.get("rider"), secret: "demo" });
+const cred = me.get(tripId);
+$("#bar").outerHTML = bar("내 몫");
+$("#all").href = `/s/${tripId}`;
+
+if (!cred) {
+  $("#title").textContent = "이 폰으로 탑승한 기록이 없어요";
+  $("#sub").textContent = "차 화면의 좌석 QR을 찍으면 내 몫이 여기에 나와요.";
+  $("#amount").textContent = "—";
+}
+
+function render({ trip, me: mine, bill, bills }) {
+  $("#title").textContent = `${mine.name}님 몫`;
+  $("#sub").textContent = `${trip.driverName}님 차 · ${SEAT_LABEL[mine.seat] ?? ""}`;
+  const amount = bill?.amount ?? 0;
+  $("#amount").textContent = won(amount);
+  const final = Boolean(bill?.final);
+  $("#line").innerHTML = bill
+    ? final
+      ? `<b>${km(bill.distanceKm)}</b> 탔어요${bill.alightPlace ? ` · ${esc(bill.alightPlace)}에서 하차` : ""} · 금액 확정`
+      : `<span class="live-dot"></span><b>${km(bill.distanceKm)}</b>째 타는 중 · 내리면 확정돼요`
+    : "출발하면 금액이 쌓이기 시작해요.";
+
+  const pay = trip.payLink;
+  $("#actions").innerHTML = final
+    ? pay
+      ? `<a class="btn primary" href="${esc(pay)}" rel="noopener">${esc(trip.driverName)}님에게 ${won(amount)} 보내기</a>`
+      : `<span class="btn primary" aria-disabled="true">${esc(trip.driverName)}님이 송금 링크를 아직 등록하지 않았어요</span>`
+    : `<button class="btn" id="checkout" type="button">여기서 내릴게요</button>`;
+  const btn = $("#checkout");
+  if (btn) btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/trips/${tripId}/riders/${cred.riderId}/checkout`, { method: "POST", body: { secret: cred.secret } });
+      $("#note").textContent = "하차를 알렸어요. 차가 문 열림을 확인하면 금액이 확정돼요.";
+    } catch (e) {
+      $("#note").textContent = e.message;
+      btn.disabled = false;
+    }
+  });
+
+  $("#unit").textContent = `${trip.fuelType === "ELECTRIC" ? "전기" : "휘발유"} ${trip.unitPrice.toLocaleString("ko-KR")}${trip.unitLabel}`;
+  const segs = bill?.segments ?? [];
+  $("#calc").innerHTML = segs.length
+    ? `<table class="calc"><thead><tr><th>구간</th><th class="r">나눈 사람</th><th class="r">내 몫</th></tr></thead><tbody>${segs
+        .map(
+          (s) => `<tr><td>${km(s.fromKm)} → ${km(s.toKm)}<small>${km(s.toKm - s.fromKm)}</small></td><td class="r">${s.sharedBy}명<small>운전자 포함</small></td><td class="r">${won(s.cost)}</td></tr>`,
+        )
+        .join("")}</tbody></table><div class="total-row"><span>합계 <small class="muted">10원 단위 반올림</small></span><span class="num">${won(bill.amount)}</span></div>
+        <p class="note">구간 기름값 = 거리 ÷ 차량이 잰 연비 × 단가. 그 구간에 탄 사람 수(운전자 포함)로 나눠요.</p>
+        <p class="note">${trip.driverName}님 차는 ${km(trip.totalKm)}를 달리는 동안 기름값 ${won(trip.totalCost)}을 썼어요.</p>`
+    : `<div class="empty">아직 달린 구간이 없어요.</div>`;
+
+  $("#lanes").innerHTML = lanes(lanePeople(trip, bills), trip.totalKm, alightCuts(trip, bills));
+}
+
+if (cred) {
+  poll(async () => {
+    try {
+      render(await api(`/api/trips/${tripId}/riders/${cred.riderId}?secret=${encodeURIComponent(cred.secret)}`));
+    } catch (e) {
+      $("#note").innerHTML = `<span class="error">${esc(e.message)} 잠시 뒤 다시 불러올게요.</span>`;
+    }
+  }, 3000);
+}
+</script>
+</body>
+</html>
